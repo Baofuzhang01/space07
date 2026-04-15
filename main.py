@@ -126,13 +126,15 @@ def _load_runtime_config(config_path, dispatch_mode, action):
         reserve_list = []
         for slot in slots:
             seatid = slot.get("seatid")
+            seat_list = seatid if isinstance(seatid, list) else [seatid]
             times = _normalize_times(slot.get("times"))
             reserve_list.append({
                 "username": username,
                 "password": decrypted_password,
                 "times": times,
                 "roomid": slot.get("roomid"),
-                "seatid": seatid if isinstance(seatid, list) else [seatid],
+                "seatid": seat_list,
+                "seat_list": seat_list,
                 "seatPageId": slot.get("seatPageId") or "",
                 "fidEnc": slot.get("fidEnc") or "",
                 "daysofweek": [current_day],
@@ -744,10 +746,39 @@ def login_and_reserve(
 
     current_dayofweek = get_current_dayofweek(action)
     for index, user in enumerate(users):
-        username = usernames_list[index] if usernames_list else user["username"]
-        password = passwords_list[index] if passwords_list else user["password"]
-        seat_list = user["seat_list"]
-        action = user.get("action", False)
+        if usernames_list:
+            if len(usernames_list) == 1:
+                username = usernames_list[0]
+                password = passwords_list[0]
+            elif index < len(usernames_list):
+                username = usernames_list[index]
+                password = passwords_list[index]
+            else:
+                logging.error("Index out of range for USERNAMES/PASSWORDS, skipping this config.")
+                continue
+        else:
+            username = user["username"]
+            password = user["password"]
+
+        times = user["times"]
+        roomid = user["roomid"]
+        seatid = user.get("seatid") or user.get("seat_list")
+        seat_list = user.get("seat_list") or seatid
+        if isinstance(seat_list, str):
+            seat_list = [seat_list]
+        if not seat_list:
+            logging.error("Empty seat list, skip this config")
+            continue
+        seatid = seat_list
+        user["seatid"] = seat_list
+        user["seat_list"] = seat_list
+        seat_page_id = user.get("seatPageId")
+        fid_enc = user.get("fidEnc")
+        daysofweek = user["daysofweek"]
+
+        if current_dayofweek not in daysofweek:
+            logging.info("Today not set to reserve")
+            continue
 
         if sessions is not None:
             s = reserve(
@@ -856,6 +887,7 @@ def main(users, action=False):
                             and current_dayofweek in user.get("daysofweek", []):
                         new_seat = _format_seat_number(original_seatids[i] + seat_offset)
                         user["seatid"] = [new_seat]
+                        user["seat_list"] = [new_seat]
                         logging.info(
                             f"[seat-increment-after-strategic] Config {i}: try seat {new_seat} "
                             f"(base {original_seatids[i]} + offset {seat_offset})"
@@ -878,6 +910,7 @@ def main(users, action=False):
                             and current_dayofweek in user.get("daysofweek", []):
                         new_seat = _format_seat_number(original_seatids[i] + seat_offset)
                         user["seatid"] = [new_seat]
+                        user["seat_list"] = [new_seat]
                         logging.info(
                             f"[seat-increment] Config {i}: try seat {new_seat} "
                             f"(base {original_seatids[i]} + offset {seat_offset})"
